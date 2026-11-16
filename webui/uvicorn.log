@@ -44016,3 +44016,14 @@ INFO:     127.0.0.1:54143 - "GET /api/tasks/efb98cabbd65/stream HTTP/1.1" 200 OK
     }
 }
 INFO:     127.0.0.1:54147 - "GET /api/tasks/efb98cabbd65/result?format=md HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54367 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54368 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54369 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54369 - "OPTIONS /api/tasks HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54369 - "POST /api/tasks HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54369 - "GET /api/tasks/8b007bb83c06/stream HTTP/1.1" 200 OK
+[2026-11-16 12:05:23] INFO: Fetched (200) <GET https://quotes.toscrape.com/> (referer: https://www.google.com/)
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [91839]
