@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Callable
 
 from . import stats as statsmod
+from .presets import extract_preset
 from .rules import (
     Spec,
     allowed_domains_for,
@@ -103,6 +104,7 @@ def _finish(task: Task, reason: str) -> None:
             "reason": reason,
             "total_items": len(task.items),
             "total_bytes": task.stats.get("response_bytes", 0),
+            "failed": task.stats.get("failed", 0),
         },
     )
 
@@ -140,11 +142,12 @@ async def run(task: Task) -> None:
 
 
 async def _run_single(task: Task) -> None:
+    """Fetch every start_url in order; one failing URL must not abort the rest."""
     spec = task.spec
-    url = spec.start_urls[0]
-    task.emit("log", {"level": "info", "message": f"单页抓取 {url}"})
+    pages: list[tuple[str, int]] = []
+    failed = 0
 
-    def _fetch() -> Any:
+    def _fetch(url: str) -> Any:
         from scrapling.fetchers import Fetcher, StealthyFetcher
 
         if spec.browser:
@@ -152,43 +155,63 @@ async def _run_single(task: Task) -> None:
         # Scrapling defaults to 30s; keep single-page tasks from hanging too long.
         return Fetcher.get(url, timeout=15)
 
-    try:
-        page = await asyncio.to_thread(_fetch)
-    except Exception as exc:
-        message = (
-            f"抓取失败: {exc}。"
-            "若提示 ModuleNotFoundError，请在 webui/.venv 中执行 pip install -e \"..[fetchers]\"；"
-            "浏览器模式还需 ./.venv/bin/scrapling install"
+    total_urls = len(spec.start_urls)
+    for index, url in enumerate(spec.start_urls, 1):
+        if task.cancel.is_set():
+            break
+        task.emit("log", {"level": "info", "message": f"单页抓取 {index}/{total_urls}：{url}"})
+        try:
+            page = await asyncio.to_thread(_fetch, url)
+        except Exception as exc:
+            failed += 1
+            task.emit("log", {"level": "warn", "message": f"跳过 {url}：{exc}"})
+            continue
+
+        try:
+            if spec.preset and spec.preset != "custom":
+                extracted = await asyncio.to_thread(extract_preset, page, url, spec.preset)
+            else:
+                extracted = extract_items(page, spec)
+        except Exception as exc:
+            task.emit("log", {"level": "error", "message": f"{url} 提取失败: {exc}"})
+            extracted = []
+
+        for item in extracted:
+            item, warning = await apply_postprocess(item, spec)
+            if warning:
+                task.emit("log", {"level": "warn", "message": warning})
+            task.items.append(item)
+            task.emit("item", item)
+
+        try:
+            byte_count = len(page.body)
+        except Exception:
+            byte_count = 0
+        pages.append((url, byte_count))
+
+        hit = statsmod.limits_reached(
+            statsmod.single(pages, len(task.items), failed),
+            spec.limits,
+            check_domains=False,
         )
-        task.emit("log", {"level": "error", "message": message})
-        task.emit("task_error", {"message": message})
-        task.status = "error"
-        task.reason = "fetch_failed"
-        return
+        if hit:
+            task.emit("log", {"level": "warn", "message": f"触发刹车：{hit}，停止后续网址"})
+            break
 
-    if task.cancel.is_set():
-        _finish(task, "cancelled")
-        return
-
-    try:
-        extracted = extract_items(page, spec)
-    except Exception as exc:
-        task.emit("log", {"level": "error", "message": f"规则提取失败: {exc}"})
-        extracted = []
-
-    for item in extracted:
-        item, warning = await apply_postprocess(item, spec)
-        if warning:
-            task.emit("log", {"level": "warn", "message": warning})
-        task.items.append(item)
-        task.emit("item", item)
-
-    try:
-        byte_count = len(page.body)
-    except Exception:
-        byte_count = 0
-    task.stats = statsmod.single(url, byte_count, len(task.items))
-    _finish(task, "completed")
+    task.stats = statsmod.single(pages, len(task.items), failed)
+    if failed and not pages:
+        task.emit(
+            "log",
+            {
+                "level": "error",
+                "message": (
+                    f"全部 {failed} 个网址抓取失败。请检查网络或 URL；"
+                    "若提示 ModuleNotFoundError，请在 webui/.venv 中执行 pip install -e \"..[fetchers]\"；"
+                    "浏览器模式还需 ./.venv/bin/scrapling install"
+                ),
+            },
+        )
+    _finish(task, "cancelled" if task.cancel.is_set() else "completed")
 
 
 async def _run_spider(task: Task) -> None:
@@ -229,7 +252,12 @@ async def _run_spider(task: Task) -> None:
             if self._stop_flag:
                 return
             try:
-                extracted = extract_items(response, self._spec)
+                if self._spec.preset and self._spec.preset != "custom":
+                    extracted = await asyncio.to_thread(
+                        extract_preset, response, str(response.url), self._spec.preset
+                    )
+                else:
+                    extracted = extract_items(response, self._spec)
             except Exception as exc:
                 self._task.emit("log", {"level": "warn", "message": f"提取失败: {exc}"})
                 extracted = []

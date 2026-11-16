@@ -1,4 +1,4 @@
-"""Render scraped items to JSON / JSONL / CSV / XML."""
+"""Render scraped items to JSON / JSONL / CSV / XML / Markdown."""
 from __future__ import annotations
 
 import csv
@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-FORMATS = ("json", "jsonl", "csv", "xml")
+FORMATS = ("json", "jsonl", "csv", "xml", "md")
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "output"
 
@@ -29,6 +29,20 @@ def _xml_tag(name: str) -> str:
     return cleaned
 
 
+def _markdown(items: list[dict[str, Any]]) -> bytes:
+    chunks: list[str] = []
+    for item in items:
+        title = _cell(item.get("title") or item.get("url") or item.get("page_url") or "")
+        body = _cell(item.get("content") or item.get("text") or "")
+        if body:
+            stripped = body.lstrip()
+            has_title = bool(title) and (stripped.startswith("# " + title) or stripped.startswith(title))
+            chunks.append((f"# {title}\n\n" if title and not has_title else "") + body)
+        else:
+            chunks.append("\n".join(f"- **{key}**: {_cell(value)}" for key, value in item.items()))
+    return "\n\n---\n\n".join(chunks).encode("utf-8")
+
+
 def render(items: list[dict[str, Any]], fmt: str) -> tuple[bytes, str]:
     if fmt not in FORMATS:
         raise ValueError(f"不支持的导出格式: {fmt}")
@@ -40,6 +54,9 @@ def render(items: list[dict[str, Any]], fmt: str) -> tuple[bytes, str]:
         lines = [json.dumps(item, ensure_ascii=False) for item in items]
         body = "\n".join(lines) + ("\n" if lines else "")
         return body.encode("utf-8"), "application/x-ndjson"
+
+    if fmt == "md":
+        return _markdown(items), "text/markdown"
 
     if fmt == "csv":
         keys: list[str] = []

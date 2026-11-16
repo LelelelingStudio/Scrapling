@@ -123,6 +123,25 @@
   .cmd-row .btn { min-width: 76px; }
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
   .step { color: var(--muted); font-size: 11px; margin: 14px 0 4px; }
+  .presets { display: grid; gap: 8px; }
+  .preset {
+    display: block; position: relative; margin: 0; padding: 11px 13px 11px 34px;
+    border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2);
+    cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .preset:hover { border-color: var(--accent); }
+  .preset.active { border-color: var(--accent); background: rgba(79,156,249,.10); }
+  .preset input { position: absolute; left: 12px; top: 14px; accent-color: var(--accent); }
+  .p-title { display: block; font-size: 13px; font-weight: 600; color: var(--text); }
+  .p-desc { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.45; }
+  details.advanced { padding: 0; }
+  details.advanced summary { padding: 16px 18px; cursor: pointer; font-size: 13px; font-weight: 600; list-style: none; }
+  details.advanced summary::-webkit-details-marker { display: none; }
+  details.advanced summary::before { content: '▸  '; color: var(--accent); }
+  details.advanced[open] summary::before { content: '▾  '; }
+  details.advanced .adv-body { padding: 0 18px 18px; border-top: 1px solid var(--line); }
+  details.advanced h3 { font-size: 12px; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
+  td.truncated { cursor: help; }
 </style>
 </head>
 <body>
@@ -154,68 +173,90 @@
 <div class="layout">
   <div>
     <div class="card">
-      <h2>抓取配置 <span>表单会同步到右侧 JSON 规则</span></h2>
-      <div class="row">
-        <div><label for="mode">抓取模式</label>
-          <select id="mode"><option value="single">单页抓取</option><option value="spider">整站 / 持续爬取</option></select></div>
-        <div><label for="scope">链接范围</label>
-          <select id="scope"><option value="same_site">仅同站</option><option value="discover_domains">发现更多域名</option></select></div>
+      <h2>① 选抓取方式 <span>不用写代码，选一个就行</span></h2>
+      <div class="presets" id="presets">
+        <label class="preset active"><input type="radio" name="preset" value="article" checked>
+          <span class="p-title">智能提取新闻正文</span>
+          <span class="p-desc">自动避开导航、广告、侧边栏，只留标题和正文；导出干净 Markdown</span></label>
+        <label class="preset"><input type="radio" name="preset" value="text">
+          <span class="p-title">提取页面所有文字</span>
+          <span class="p-desc">把网页上能看见的字全抓下来（自动去掉脚本和样式）</span></label>
+        <label class="preset"><input type="radio" name="preset" value="links">
+          <span class="p-title">提取页面所有链接</span>
+          <span class="p-desc">列出每个链接的文字和完整网址，相对地址自动补全</span></label>
+        <label class="preset"><input type="radio" name="preset" value="custom">
+          <span class="p-title">自定义规则（高级）</span>
+          <span class="p-desc">用 CSS 选择器 / JSON 规则精确提取字段，适合开发者</span></label>
       </div>
-      <div class="row">
-        <div><label for="sameSiteMode">同站判定</label>
-          <select id="sameSiteMode"><option value="host">同 host</option><option value="registered_domain">同注册域（含子域）</option></select></div>
-        <div><label for="container">记录容器（可选）</label>
-          <input type="text" id="container" placeholder=".quote"></div>
-      </div>
-      <label for="startUrls">起始网址（每行一个）</label>
-      <textarea id="startUrls" rows="3"></textarea>
-      <label for="allowlist">域名白名单（逗号分隔，仅发现模式）</label>
-      <input type="text" id="allowlist" placeholder="留空 = 不限制">
-      <label for="blocklist">域名黑名单（逗号分隔）</label>
-      <input type="text" id="blocklist" placeholder="例：example.com">
-      <div>
-        <label class="check"><input type="checkbox" id="follow"> 跟随页面链接继续爬</label>
-        <label class="check"><input type="checkbox" id="browser"> 使用隐身浏览器渲染（需先执行 scrapling install）</label>
-        <label class="check"><input type="checkbox" id="robots"> 遵守 robots.txt</label>
+      <div class="note good" id="easyHint" style="margin-top:14px">当前是简易模式：不用填任何规则，粘贴网址后直接点「开始抓取」。</div>
+    </div>
+
+    <div class="card">
+      <h2>② 粘贴网址 <span>每行一个，单页模式会逐个抓取</span></h2>
+      <label for="startUrls">起始网址</label>
+      <textarea id="startUrls" rows="4"></textarea>
+      <div class="row" style="margin-top:12px">
+        <div><label for="mode">抓取范围</label>
+          <select id="mode"><option value="single">只抓这些网址</option><option value="spider">顺着链接继续爬</option></select></div>
+        <div><label>页面加载方式</label>
+          <label class="check"><input type="checkbox" id="browser"> 需要 JS 渲染（慢，需先 scrapling install）</label>
+          <label class="check"><input type="checkbox" id="robots"> 遵守 robots.txt</label></div>
       </div>
     </div>
 
     <div class="card">
-      <h2>硬刹车 <span>任一条件触发即停止</span></h2>
-      <div class="row3">
-        <div><label for="maxPages">最大页数</label><input type="number" id="maxPages" min="1"></div>
-        <div><label for="maxDomains">最大域名数</label><input type="number" id="maxDomains" min="1"></div>
-        <div><label for="concurrency">并发数</label><input type="number" id="concurrency" min="1" max="50"></div>
-      </div>
-      <div class="row">
-        <div><label for="maxBytes">最大流量（字节）</label><input type="number" id="maxBytes" min="1"></div>
-        <div><label for="delay">请求间隔（秒）</label><input type="number" id="delay" step="0.1" min="0"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>运行</h2>
+      <h2>③ 开始</h2>
       <div class="actions">
         <button class="btn primary" id="startBtn">开始抓取</button>
         <button class="btn" id="cancelBtn" disabled>取消任务</button>
       </div>
       <div class="note" id="runNote"></div>
-      <div class="hint">提示：整站模式建议先把「最大页数」调小（如 3）试跑。</div>
+      <div class="hint">提示：选「顺着链接继续爬」时，建议先在高级设置里把最大页数调小（如 3）试跑。</div>
     </div>
+
+    <details class="card advanced" id="advanced">
+      <summary>高级 / 开发者模式（链接范围、硬刹车、JSON 规则）</summary>
+      <div class="adv-body">
+        <h3>链接范围（仅整站模式生效）</h3>
+        <div class="row">
+          <div><label for="scope">范围</label>
+            <select id="scope"><option value="same_site">仅同站</option><option value="discover_domains">发现更多域名</option></select></div>
+          <div><label for="sameSiteMode">同站判定</label>
+            <select id="sameSiteMode"><option value="host">同 host</option><option value="registered_domain">同注册域（含子域）</option></select></div>
+        </div>
+        <label class="check" id="followLabel"><input type="checkbox" id="follow"> 跟随页面链接继续爬</label>
+        <label for="allowlist">域名白名单（逗号分隔，仅发现模式）</label>
+        <input type="text" id="allowlist" placeholder="留空 = 不限制">
+        <label for="blocklist">域名黑名单（逗号分隔）</label>
+        <input type="text" id="blocklist" placeholder="例：example.com">
+
+        <h3>硬刹车（任一条件触发即停止）</h3>
+        <div class="row3">
+          <div><label for="maxPages">最大页数</label><input type="number" id="maxPages" min="1"></div>
+          <div><label for="maxDomains">最大域名数</label><input type="number" id="maxDomains" min="1"></div>
+          <div><label for="concurrency">并发数</label><input type="number" id="concurrency" min="1" max="50"></div>
+        </div>
+        <div class="row">
+          <div><label for="maxBytes">最大流量（字节）</label><input type="number" id="maxBytes" min="1"></div>
+          <div><label for="delay">请求间隔（秒）</label><input type="number" id="delay" step="0.1" min="0"></div>
+        </div>
+
+        <h3>JSON 规则编辑器（仅「自定义规则」模式生效）</h3>
+        <div><label for="container">记录容器（可选）</label>
+          <input type="text" id="container" placeholder=".quote" title="填写后按此容器切分记录，字段选择器要写相对路径"></div>
+        <textarea class="code" id="editor" spellcheck="false" style="margin-top:10px"></textarea>
+        <div class="hint">带 <b>container</b> 时后端按它切分记录，字段选择器写<b>相对路径</b>（如 <code>.text::text</code>）；不带则按整页提取并逐行合并，选择器写完整路径（如 <code>.quote .text::text</code>）。</div>
+        <div class="actions">
+          <button class="btn" id="applyBtn">应用规则</button>
+          <button class="btn" id="validateBtn">校验规则</button>
+          <button class="btn ghost" id="resetBtn">恢复默认</button>
+        </div>
+        <div class="note" id="ruleNote"></div>
+      </div>
+    </details>
   </div>
 
   <div>
-    <div class="card">
-      <h2>规则编辑器 <span>可直接改 JSON，新规则粘贴进来点「应用规则」</span></h2>
-      <textarea class="code" id="editor" spellcheck="false"></textarea>
-      <div class="actions">
-        <button class="btn" id="applyBtn">应用规则</button>
-        <button class="btn" id="validateBtn">校验规则</button>
-        <button class="btn ghost" id="resetBtn">恢复默认</button>
-      </div>
-      <div class="note" id="ruleNote"></div>
-    </div>
-
     <div class="card">
       <h2>实时流量与状态 <span>SSE 推送</span></h2>
       <div class="stats-grid">
@@ -238,6 +279,7 @@
       </div>
       <div class="export">
         <select id="exportFormat">
+          <option value="md">Markdown（干净文章）</option>
           <option value="json">JSON</option>
           <option value="jsonl">JSONL</option>
           <option value="csv">CSV</option>
@@ -257,6 +299,7 @@ const CMD_RUN = './.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1
 
 const DEFAULT_SPEC = {
   mode: 'single',
+  preset: 'article',
   scope: 'same_site',
   same_site_mode: 'host',
   start_urls: ['https://quotes.toscrape.com/'],
@@ -275,9 +318,22 @@ const DEFAULT_SPEC = {
     robots_txt_obey: true
   },
   browser: false,
-  follow: true,
+  follow: false,
   domain_allowlist: [],
   domain_blocklist: []
+};
+
+const PRESET_COLUMNS = {
+  article: ['url', 'title', 'content'],
+  text: ['url', 'text'],
+  links: ['page_url', 'link_text', 'link_url']
+};
+
+const PRESET_LABELS = {
+  article: '智能提取新闻正文',
+  text: '提取页面所有文字',
+  links: '提取页面所有链接',
+  custom: '自定义规则'
 };
 
 const $ = (id) => document.getElementById(id);
@@ -353,8 +409,33 @@ function splitList(value) {
   return value.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
 }
 
+function currentPreset() {
+  const el = document.querySelector('input[name="preset"]:checked');
+  return el ? el.value : 'article';
+}
+
+function syncPresetUI() {
+  const preset = currentPreset();
+  document.querySelectorAll('.preset').forEach(label => {
+    label.classList.toggle('active', label.querySelector('input').checked);
+  });
+  const custom = preset === 'custom';
+  $('easyHint').style.display = custom ? 'none' : '';
+  if (custom) $('advanced').open = true;
+  $('exportFormat').value = (preset === 'article' || preset === 'text') ? 'md' : 'json';
+}
+
+function syncModeLocks() {
+  const isSingle = $('mode').value === 'single';
+  $('follow').disabled = isSingle;
+  $('followLabel').style.opacity = isSingle ? '0.45' : '';
+  $('followLabel').title = isSingle ? '单页模式不会跟随链接，仅整站模式可用' : '';
+}
+
 function syncForm() {
   $('mode').value = spec.mode || 'single';
+  const preset = spec.preset || 'article';
+  document.querySelectorAll('input[name="preset"]').forEach(r => { r.checked = (r.value === preset); });
   $('scope').value = spec.scope || 'same_site';
   $('sameSiteMode').value = spec.same_site_mode || 'host';
   $('container').value = spec.container || '';
@@ -370,18 +451,21 @@ function syncForm() {
   $('concurrency').value = L.concurrent_requests ?? 5;
   $('delay').value = L.download_delay ?? 0.5;
   $('robots').checked = L.robots_txt_obey !== false;
+  syncModeLocks();
+  syncPresetUI();
 }
 
 function readForm() {
   const L = spec.limits || (spec.limits = {});
   spec.mode = $('mode').value;
+  spec.preset = currentPreset();
   spec.scope = $('scope').value;
   spec.same_site_mode = $('sameSiteMode').value;
   spec.container = $('container').value.trim() || null;
   spec.start_urls = $('startUrls').value.split('\n').map(s => s.trim()).filter(Boolean);
   spec.domain_allowlist = splitList($('allowlist').value);
   spec.domain_blocklist = splitList($('blocklist').value);
-  spec.follow = $('follow').checked;
+  spec.follow = ($('mode').value === 'spider') && $('follow').checked;
   spec.browser = $('browser').checked;
   L.max_pages = Number($('maxPages').value) || 50;
   L.max_bytes = Number($('maxBytes').value) || 8000000;
@@ -389,6 +473,7 @@ function readForm() {
   L.concurrent_requests = Number($('concurrency').value) || 5;
   L.download_delay = Number($('delay').value) || 0;
   L.robots_txt_obey = $('robots').checked;
+  syncModeLocks();
 }
 
 function renderEditor() {
@@ -396,17 +481,34 @@ function renderEditor() {
   editorDirty = false;
 }
 
+function containerTip(parsed) {
+  return parsed.container
+    ? ' ｜ 容器模式已启用：后端按 ' + parsed.container + ' 切分记录，字段选择器请写相对路径'
+    : ' ｜ 未设容器：后端按整页提取，字段选择器请写完整路径';
+}
+
+function ruleTip(parsed) {
+  if (parsed.preset && parsed.preset !== 'custom') {
+    return ' ｜ 预设模式：' + (PRESET_LABELS[parsed.preset] || parsed.preset) + '，container / fields 不生效';
+  }
+  return containerTip(parsed);
+}
+
 function applyEditor() {
   try {
     const parsed = JSON.parse($('editor').value);
-    if (!parsed.fields || typeof parsed.fields !== 'object' || !Object.keys(parsed.fields).length) {
-      throw new Error('缺少 fields 字段规则');
+    if (!parsed.fields || typeof parsed.fields !== 'object') {
+      throw new Error('缺少 fields');
+    }
+    if ((!parsed.preset || parsed.preset === 'custom') && !Object.keys(parsed.fields).length) {
+      throw new Error('自定义模式需要 fields 字段规则');
     }
     if (!Array.isArray(parsed.start_urls) || !parsed.start_urls.length) {
       throw new Error('缺少 start_urls');
     }
     parsed.limits = Object.assign({}, DEFAULT_SPEC.limits, parsed.limits || {});
     parsed.mode = parsed.mode || 'single';
+    parsed.preset = parsed.preset || 'custom';
     parsed.scope = parsed.scope || 'same_site';
     parsed.same_site_mode = parsed.same_site_mode || 'host';
     parsed.domain_allowlist = parsed.domain_allowlist || [];
@@ -414,7 +516,7 @@ function applyEditor() {
     spec = parsed;
     editorDirty = false;
     syncForm();
-    setNote('规则已应用，共 ' + Object.keys(spec.fields).length + ' 个字段');
+    setNote('规则已应用，共 ' + Object.keys(spec.fields).length + ' 个字段' + ruleTip(spec));
     return true;
   } catch (e) {
     setNote('规则无效：' + e.message, true);
@@ -425,12 +527,13 @@ function applyEditor() {
 function validateEditor() {
   try {
     const parsed = JSON.parse($('editor').value);
-    if (!parsed.fields || !Object.keys(parsed.fields).length) throw new Error('缺少 fields');
+    if (!parsed.fields || typeof parsed.fields !== 'object') throw new Error('缺少 fields');
+    if ((!parsed.preset || parsed.preset === 'custom') && !Object.keys(parsed.fields).length) throw new Error('自定义模式需要 fields');
     if (!Array.isArray(parsed.start_urls) || !parsed.start_urls.length) throw new Error('缺少 start_urls');
     for (const [name, rule] of Object.entries(parsed.fields)) {
       if (!rule.selector) throw new Error('字段 ' + name + ' 缺少 selector');
     }
-    setNote('JSON 合法，字段数：' + Object.keys(parsed.fields).length);
+    setNote('JSON 合法，字段数：' + Object.keys(parsed.fields).length + ruleTip(parsed));
     return true;
   } catch (e) {
     setNote('校验失败：' + e.message, true);
@@ -468,7 +571,8 @@ function renderStats(d) {
 }
 
 function buildHeader() {
-  columns = Object.keys(spec.fields || {});
+  columns = PRESET_COLUMNS[spec.preset] ? Array.from(PRESET_COLUMNS[spec.preset]) : Object.keys(spec.fields || {});
+  if (!columns.length) columns = ['result'];
   $('thead').innerHTML = '';
   for (const key of columns) {
     const th = document.createElement('th');
@@ -483,8 +587,10 @@ function appendRow(item) {
   for (const key of columns) {
     const td = document.createElement('td');
     const value = item[key];
-    td.textContent = (value === null || value === undefined) ? '' :
+    const raw = (value === null || value === undefined) ? '' :
       (typeof value === 'object' ? JSON.stringify(value) : String(value));
+    td.textContent = raw.length > 240 ? raw.slice(0, 240) + '…' : raw;
+    if (raw.length > 240) { td.title = raw; td.className = 'truncated'; }
     tr.appendChild(td);
   }
   $('tbody').appendChild(tr);
@@ -539,7 +645,15 @@ async function startTask() {
       const d = JSON.parse(e.data);
       setStatus('已结束 · ' + d.reason + ' · ' + d.total_items + ' 条');
       appendLog({ level: 'info', message: '任务结束：' + d.reason + '，共 ' + d.total_items + ' 条，流量 ' + fmtBytes(d.total_bytes) });
-      setRunNote('完成：' + d.total_items + ' 条结果');
+      setRunNote('完成：' + d.total_items + ' 条结果', d.total_items === 0);
+      if (d.total_items === 0) {
+        appendLog({ level: 'warn', message: (spec.preset && spec.preset !== 'custom')
+          ? '⚠️ 抓取成功但未提取到数据，请换一个抓取方式，或确认网址能正常打开'
+          : '⚠️ 抓取成功但未提取到数据，请检查 CSS 选择器是否正确' });
+      }
+      if (d.failed > 0) {
+        appendLog({ level: 'error', message: '有 ' + d.failed + ' 个网址/请求失败，请检查上方日志、网络或 URL' });
+      }
       $('startBtn').disabled = false;
       $('cancelBtn').disabled = true;
       es.close();
@@ -625,6 +739,18 @@ for (const id of formIds) {
     setNote('');
   });
 }
+
+document.querySelectorAll('input[name="preset"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    readForm();
+    renderEditor();
+    syncPresetUI();
+    $('tbody').innerHTML = '';
+    $('emptyHint').style.display = '';
+    buildHeader();
+    setNote('');
+  });
+});
 
 syncForm();
 renderEditor();

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 SANDBOX = Path(__file__).with_name("js_sandbox.js")
 
@@ -32,10 +32,12 @@ class Limits(BaseModel):
 
 class Spec(BaseModel):
     mode: Literal["single", "spider"] = "single"
+    preset: Literal["article", "text", "links", "custom"] | None = None
     scope: Literal["same_site", "discover_domains"] = "same_site"
     same_site_mode: Literal["host", "registered_domain"] = "host"
     start_urls: list[str] = Field(min_length=1)
-    fields: dict[str, FieldRule] = Field(min_length=1)
+    # Easy-mode presets need no fields at all; custom mode still requires them.
+    fields: dict[str, FieldRule] = Field(default_factory=dict)
     limits: Limits = Field(default_factory=Limits)
     browser: bool = False
     container: str | None = None
@@ -56,6 +58,12 @@ class Spec(BaseModel):
             if is_private_host(parsed.hostname):
                 raise ValueError(f"不允许抓取本机/内网地址: {url}")
         return cleaned
+
+    @model_validator(mode="after")
+    def _check_fields(self) -> "Spec":
+        if (not self.preset or self.preset == "custom") and not self.fields:
+            raise ValueError("自定义模式必须提供 fields 字段规则")
+        return self
 
 
 def host_of(url: str) -> str:
@@ -163,7 +171,9 @@ def extract_items(page: Any, spec: Spec) -> list[dict[str, Any]]:
     count = max((len(v) for v in columns.values()), default=0)
     return [
         {
-            name: _collapse(rule, columns[name][i] if i < len(columns[name]) else [])
+            # Pass a list (not a bare value) so _collapse keeps the declared
+            # type: string -> scalar, array_* -> one-element list.
+            name: _collapse(rule, columns[name][i:i + 1])
             for name, rule in spec.fields.items()
         }
         for i in range(count)
