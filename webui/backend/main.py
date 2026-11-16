@@ -79,6 +79,10 @@ async def task_status(task_id: str) -> dict:
         "reason": task.reason,
         "item_count": len(task.items),
         "stats": task.stats,
+        # Expose the values actually applied, so limits passing can be verified.
+        "limits": task.spec.limits.model_dump(),
+        "crawl_resume": task.spec.crawl_resume,
+        "crawl_dir": str(task.crawl_dir) if task.crawl_dir else None,
     }
 
 

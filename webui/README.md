@@ -57,6 +57,26 @@ cd /Users/david/Documents/GitHub/Scrapling/webui
 - 任务结束但提取到 0 条记录时，日志会用黄色提示；预设模式提示「请换一个抓取方式，或确认网址能正常打开」，自定义模式提示「请检查 CSS 选择器是否正确」。若有网址抓取失败，另用红色提示失败数量。
 - 任务正常完成时日志输出「已完成，共 X 条」；取消或触发刹车时输出「任务结束（原因），共 X 条」。
 
+## 断点续爬（大任务支持）
+
+硬刹车默认 **500 页 / 200 MB**（`max_pages` / `max_bytes`），高级面板「最大页数」旁有「设大一些可以挖得更深」提示。前端把输入转成数字并钳制到后端 `Limits` 的合法范围后，随 `POST /api/tasks` 提交；后端在启动日志里回显实际生效值，`GET /api/tasks/{id}/status` 也会返回 `limits` / `crawl_resume` / `crawl_dir` 便于核对。
+
+Scrapling 0.5.1 **没有引擎级的 `max_pages` / `max_bytes` 类属性**，这两个刹车由 `backend/worker.py` 在每条 item 到达后读取 `spider.stats` 自行判断（`statsmod.limits_reached()`）；真正赋给 `UISpider` 类属性的是 `concurrent_requests` / `download_delay` / `robots_txt_obey` / `allowed_domains` 等。
+
+在「③ 开始」勾选「开启断点续爬 (保存抓取进度)」（单页模式下置灰禁用），后端会：
+
+1. 用第一个起始网址的域名拼出 `webui/crawl_data/<域名>/`（用绝对路径，不受 uvicorn 启动目录影响），传给 `UISpider(crawldir=..., interval=15)`；
+2. 每 15 秒、以及触发刹车 / 取消任务时，由 Scrapling 把「未完成的请求队列 + seen 去重指纹」写入 `checkpoint.pkl`；
+3. 下次仍勾选该选项再点开始，日志会出现「正在从本地恢复上次的进度...」和「引擎已载入上次队列：跳过起始网址，继续抓取剩余链接」，接着上次停下的地方继续跑，而不是从头再抓一遍。
+
+按源码语义必须知道的几点：
+
+- **只有「停下」才有进度可续**：触发页数/流量刹车、点「取消」、或异常中断会保留 `checkpoint.pkl`；如果队列正常跑空，Scrapling 会主动 `cleanup()` 删掉它（日志提示「本次队列已跑完，引擎清除了本地进度」），下一次自然从头开始。
+- checkpoint 只存队列与去重集合，**不存已抓到的 items / 统计**；恢复后 `spider.stats` 从 0 开始，因此 `max_pages` / `max_bytes` 是「本次运行」的额度，这正好支持分多次跑完一个大站。
+- 恢复时引擎跳过 `start_urls`，请保持起始网址、域名白黑名单、`scope` 等配置与首次一致；改动这些会导致指纹不匹配或走向变化。
+- 文件名固定为 `checkpoint.pkl` 且与任务 id 无关，因此**同一域名同时只允许一个续爬任务**，第二个会收到明确错误事件；想彻底重来就删掉 `webui/crawl_data/<域名>/` 目录。
+- `crawl_data/` 已加入 `webui/.gitignore`；里面是 `pickle` 文件，只在本机使用，不要打开来路不明的进度文件。
+
 ## 高级：自定义 JSON 规则
 
 只有选「自定义规则（高级）」时下面这套规则才生效。预设模式下 `container` / `fields` 会被忽略，`fields` 甚至可以为空。
@@ -75,11 +95,12 @@ cd /Users/david/Documents/GitHub/Scrapling/webui
     "tags":   { "selector": ".tag::text", "type": "array_string" }
   },
   "limits": {
-    "max_pages": 50, "max_bytes": 8000000, "max_domains": 10,
+    "max_pages": 500, "max_bytes": 200000000, "max_domains": 10,
     "concurrent_requests": 5, "download_delay": 0.5, "robots_txt_obey": true
   },
   "browser": false,
   "follow": false,
+  "crawl_resume": false,
   "domain_allowlist": [],
   "domain_blocklist": []
 }
@@ -94,7 +115,8 @@ cd /Users/david/Documents/GitHub/Scrapling/webui
 - `fields[*].type`：`string` / `number` / `array_string` / `array_number` / `html`。`array_*` 建议配合 `container` 使用（取一个容器块内的全部值）；无 container 时按整页逐行 zip，每个值单独成一条记录，array 字段会是单元素列表。
 - `fields[*].postprocess_js`：JS 函数体，参数为 `value`，必须 `return`。在 Node `vm` 沙箱里执行，超时 100ms，出错回退原值。
 - `follow`：仅整站模式生效。选「单页抓取」时前端会置灰禁用该勾选框，并强制提交 `false`。
-- `limits`：三项硬刹车（页数 / 流量字节 / 域名数）任一触发即停止。单页模式同样受 `max_pages` / `max_bytes` 约束，但不检查域名数。
+- `crawl_resume`：仅整站模式生效，把进度存到 `crawl_data/<起始域名>/` 并在下次续跑，详见上一节。单页模式下前端会置灰禁用并强制提交 `false`。
+- `limits`：三项硬刹车（页数 / 流量字节 / 域名数）任一触发即停止，默认 500 页 / 200 MB / 10 域名。前端按数字提交，后端启动日志会回显生效值；由 `worker.py` 依据 `spider.stats` 执行，因为 Scrapling 没有对应的 Spider 类属性。单页模式同样受 `max_pages` / `max_bytes` 约束，但不检查域名数。
 
 ## 接口
 
@@ -105,7 +127,7 @@ cd /Users/david/Documents/GitHub/Scrapling/webui
 | POST | `/api/tasks` | 提交规则，返回 `task_id` |
 | GET | `/api/tasks/{id}/stream` | SSE：`connected` / `item` / `stats` / `log` / `done` / `task_error` |
 | POST | `/api/tasks/{id}/cancel` | 协作式取消 |
-| GET | `/api/tasks/{id}/status` | 轮询兜底 |
+| GET | `/api/tasks/{id}/status` | 轮询兜底，另返回 `limits` / `crawl_resume` / `crawl_dir` |
 | GET | `/api/tasks/{id}/result?format=md\|json\|jsonl\|csv\|xml` | 导出，同时写入 `output/{id}/` |
 
 自定义错误事件用 `task_error` 而不是 `error`，避免和 EventSource 原生断连事件冲突。
@@ -121,6 +143,7 @@ cd /Users/david/Documents/GitHub/Scrapling/webui
 7. SSE 用 FastAPI 原生 `StreamingResponse`，不引入 `sse-starlette`；JS 沙箱用 Node `vm`，不引入 `py_mini_racer`。
 8. `main_content_only` 不是正文抽取（只是 `<body>`），仓库内也没有 readability 类实现，所以简易模式的正文识别由 `backend/presets.py` 自己做；纯文本用 `get_all_text()`、链接用 `css("a[href]")` + `urljoin()`，都是 Scrapling 原生 API。
 9. `Spider.stream()` 是 async generator：首次 `__anext__()` 里 `set_logger()` 返回 ContextVar Token，`finally` 里 `reset_logger(token)` **必须在创建它的同一个 Context 执行**；引擎的 `_stream()` 还把 anyio TaskGroup 跨 `yield` 持有，要求每次 `__anext__()` 都在**同一个 Task** 里跑。早期「每取一条数据就新建一个 Task 调 `__anext__()`」会在收尾时报 `<Token var=<ContextVar name='scrapling_logger'...> was created in a different Context`，把成功完成的爬取误判成 `task_error`。现在 `backend/worker.py` 用一个带 `contextvars.copy_context()` 的独立 Task 驱动整条流，再用 `asyncio.Queue` 把结果交给消费协程；单页 / 隐身浏览器抓取则在独立线程 + 独立 Context 中执行。收尾只由那个独立 Task 完成，绝不从别的 Task 调 `generator.aclose()`。
+10. Scrapling 的 checkpoint 由构造参数 `crawldir` 开启（**不是类属性**），文件固定为 `<crawldir>/checkpoint.pkl`，内容是 `pickle` 后的「未完成请求 + seen 指纹」，不含 items / stats；默认每 300 秒才写一次周期快照，本 UI 改为 15 秒。引擎在正常跑完（未 pause、未异常）时会 `cleanup()` 删除该文件，只有刹车 / 取消 / 中断才保留；`stream()` 与 `start()` 共用同一套 checkpoint 逻辑，但 `stream()` 没有 SIGINT 钩子，所以取消依赖 `spider.pause()`。
 
 ## 已知限制
 
@@ -130,8 +153,9 @@ cd /Users/david/Documents/GitHub/Scrapling/webui
 - 只绑定 `127.0.0.1`，不要改成 `0.0.0.0`。放行 `Origin: null` 意味着任何本地 HTML 文件都能调用本 API，请勿在本机打开来路不明的 HTML。
 - 私有 IP / `localhost` / `.local` 等字面地址会被拒绝；未做域名 DNS 解析后的 IP 检查，跨域发现模式请自行配好白名单。
 - 「发现更多域名」默认允许跟随外链，请遵守目标站 ToS 与 robots.txt，不要高频压站。
-- 取消是协作式：取消事件与「队列里的下一条数据」竞争等待，因此即使引擎还没产出任何结果也能立即停止；同时调用引擎的 `pause()` 两次触发强制停止，`_stop_flag` 让 `parse()` 不再跟随新链接。整站流的 async generator 只在那个独立 Task 内收尾（最多等 10 秒，超时才取消 driver），不会从别的 Task 关闭它。已在队列中的少量请求可能仍会完成。
+- 取消是协作式：取消事件与「队列里的下一条数据」竞争等待，因此即使引擎还没产出任何结果也能立即停止；同时调用引擎的 `pause()` 两次触发强制停止，`_stop_flag` 让 `parse()` 不再跟随新链接。整站流的 async generator 只在那个独立 Task 内收尾（最多等 10 秒；开启断点续爬时放宽到 30 秒，给 checkpoint 落盘留时间），不会从别的 Task 关闭它。已在队列中的少量请求可能仍会完成。
 - 单页 HTTP 请求超时 15 秒（浏览器模式沿用 Scrapling 默认 30 秒）；整站模式沿用引擎默认 30 秒，另有页数/流量/域名三项刹车。
 - 不要在短时间内对同一站点反复跑测试，容易被限流导致请求超时。
 - 浏览器模式每次抓取都要启动 Chromium，慢且占资源；默认关闭。若日志出现 `Executable doesn't exist at .../chromium-XXXX/`，说明 Playwright/Patchright 升级后缺少对应版本的浏览器，执行 `./.venv/bin/patchright install chromium`（或 `./.venv/bin/scrapling install`）补齐；单页模式会把该错误记为跳过并继续其余网址。
-- `output/`、`.venv/` 已被 `webui/.gitignore` 忽略，不要提交抓取结果或登录态。
+- `output/`、`.venv/`、`crawl_data/` 已被 `webui/.gitignore` 忽略，不要提交抓取结果、进度文件或登录态。
+- 断点续爬的 `checkpoint.pkl` 是 pickle 文件，Scrapling 加载失败会静默当作「从头开始」（本 UI 会用黄色日志提示）；升级 Python / Scrapling 后若无法恢复，删掉 `webui/crawl_data/<域名>/` 重跑即可。

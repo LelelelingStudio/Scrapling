@@ -206,12 +206,14 @@
 
     <div class="card">
       <h2>③ 开始</h2>
-      <div class="actions">
+      <label class="check" id="resumeLabel"><input type="checkbox" id="resume"> 开启断点续爬 (保存抓取进度)</label>
+      <div class="hint" style="margin-top:6px">整站模式会把队列进度存到 <code>webui/crawl_data/&lt;域名&gt;/</code>；下次勾选同一项再点开始，就接着上次停下的地方继续跑。单页模式不适用。</div>
+      <div class="actions" style="margin-top:12px">
         <button class="btn primary" id="startBtn">开始抓取</button>
         <button class="btn" id="cancelBtn" disabled>取消任务</button>
       </div>
       <div class="note" id="runNote"></div>
-      <div class="hint">提示：选「顺着链接继续爬」时，建议先在高级设置里把最大页数调小（如 3）试跑。</div>
+      <div class="hint">默认最多 500 页 / 200 MB，足够挖得比较深；想快速试跑可在高级设置里把最大页数调小（如 3）。</div>
     </div>
 
     <details class="card advanced" id="advanced">
@@ -231,8 +233,10 @@
         <input type="text" id="blocklist" placeholder="例：example.com">
 
         <h3>硬刹车（任一条件触发即停止）</h3>
+        <div class="hint" style="margin:0 0 10px">数值设大一些可以挖得更深；页数与流量上限都会随任务提交给后端。</div>
         <div class="row3">
-          <div><label for="maxPages">最大页数</label><input type="number" id="maxPages" min="1"></div>
+          <div><label for="maxPages">最大页数</label><input type="number" id="maxPages" min="1" max="10000">
+            <div class="hint" style="margin:4px 0 0">设大一些可以挖得更深（默认 500）</div></div>
           <div><label for="maxDomains">最大域名数</label><input type="number" id="maxDomains" min="1"></div>
           <div><label for="concurrency">并发数</label><input type="number" id="concurrency" min="1" max="50"></div>
         </div>
@@ -310,8 +314,8 @@ const DEFAULT_SPEC = {
     tags:   { selector: '.tag::text',    type: 'array_string' }
   },
   limits: {
-    max_pages: 50,
-    max_bytes: 8000000,
+    max_pages: 500,
+    max_bytes: 200000000,
     max_domains: 10,
     concurrent_requests: 5,
     download_delay: 0.5,
@@ -319,6 +323,7 @@ const DEFAULT_SPEC = {
   },
   browser: false,
   follow: false,
+  crawl_resume: false,
   domain_allowlist: [],
   domain_blocklist: []
 };
@@ -430,6 +435,16 @@ function syncModeLocks() {
   $('follow').disabled = isSingle;
   $('followLabel').style.opacity = isSingle ? '0.45' : '';
   $('followLabel').title = isSingle ? '单页模式不会跟随链接，仅整站模式可用' : '';
+  $('resume').disabled = isSingle;
+  $('resumeLabel').style.opacity = isSingle ? '0.45' : '';
+  $('resumeLabel').title = isSingle ? '断点续爬需要整站模式的 Spider，单页模式不可用' : '';
+}
+
+function numInput(id, fallback, min, max) {
+  const raw = String($(id).value || '').trim();
+  const n = Number(raw);
+  if (raw === '' || !Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
 }
 
 function syncForm() {
@@ -444,9 +459,10 @@ function syncForm() {
   $('blocklist').value = (spec.domain_blocklist || []).join(', ');
   $('follow').checked = spec.follow !== false;
   $('browser').checked = !!spec.browser;
+  $('resume').checked = !!spec.crawl_resume;
   const L = spec.limits || {};
-  $('maxPages').value = L.max_pages ?? 50;
-  $('maxBytes').value = L.max_bytes ?? 8000000;
+  $('maxPages').value = L.max_pages ?? 500;
+  $('maxBytes').value = L.max_bytes ?? 200000000;
   $('maxDomains').value = L.max_domains ?? 10;
   $('concurrency').value = L.concurrent_requests ?? 5;
   $('delay').value = L.download_delay ?? 0.5;
@@ -467,10 +483,11 @@ function readForm() {
   spec.domain_blocklist = splitList($('blocklist').value);
   spec.follow = ($('mode').value === 'spider') && $('follow').checked;
   spec.browser = $('browser').checked;
-  L.max_pages = Number($('maxPages').value) || 50;
-  L.max_bytes = Number($('maxBytes').value) || 8000000;
-  L.max_domains = Number($('maxDomains').value) || 10;
-  L.concurrent_requests = Number($('concurrency').value) || 5;
+  spec.crawl_resume = ($('mode').value === 'spider') && $('resume').checked;
+  L.max_pages = numInput('maxPages', 500, 1, 10000);
+  L.max_bytes = numInput('maxBytes', 200000000, 1, Number.MAX_SAFE_INTEGER);
+  L.max_domains = numInput('maxDomains', 10, 1, 1000);
+  L.concurrent_requests = numInput('concurrency', 5, 1, 50);
   L.download_delay = Number($('delay').value) || 0;
   L.robots_txt_obey = $('robots').checked;
   syncModeLocks();
@@ -513,6 +530,7 @@ function applyEditor() {
     parsed.same_site_mode = parsed.same_site_mode || 'host';
     parsed.domain_allowlist = parsed.domain_allowlist || [];
     parsed.domain_blocklist = parsed.domain_blocklist || [];
+    parsed.crawl_resume = !!parsed.crawl_resume;
     spec = parsed;
     editorDirty = false;
     syncForm();
@@ -619,6 +637,9 @@ async function startTask() {
 
   if (currentES) currentES.close();
   clearResults();
+  if (spec.crawl_resume) {
+    appendLog({ level: 'info', message: '断点续爬已开启：正在检查本地进度…' });
+  }
   setStatus('运行中…');
   setRunNote('正在创建任务…');
   $('startBtn').disabled = true;
@@ -729,7 +750,7 @@ $('cancelBtn').addEventListener('click', cancelTask);
 $('exportBtn').addEventListener('click', downloadResult);
 
 const formIds = ['mode', 'scope', 'sameSiteMode', 'container', 'startUrls', 'allowlist',
-  'blocklist', 'follow', 'browser', 'robots', 'maxPages', 'maxBytes', 'maxDomains',
+  'blocklist', 'follow', 'browser', 'robots', 'resume', 'maxPages', 'maxBytes', 'maxDomains',
   'concurrency', 'delay'];
 for (const id of formIds) {
   $(id).addEventListener('change', () => {

@@ -22,8 +22,10 @@ class FieldRule(BaseModel):
 
 
 class Limits(BaseModel):
-    max_pages: int = Field(default=50, ge=1, le=10000)
-    max_bytes: int = Field(default=8_000_000, ge=1)
+    # Big-crawl defaults: 500 pages need a much larger byte budget, otherwise
+    # the 8 MB brake used to stop the crawl after ~80 pages.
+    max_pages: int = Field(default=500, ge=1, le=10000)
+    max_bytes: int = Field(default=200_000_000, ge=1)
     max_domains: int = Field(default=10, ge=1, le=1000)
     concurrent_requests: int = Field(default=5, ge=1, le=50)
     download_delay: float = Field(default=0.5, ge=0.0, le=60.0)
@@ -42,6 +44,9 @@ class Spec(BaseModel):
     browser: bool = False
     container: str | None = None
     follow: bool = True
+    # Persist the spider queue under crawl_data/<host>/ so the next run resumes.
+    # Only spider mode can use it (single-page mode has no Spider instance).
+    crawl_resume: bool = False
     domain_allowlist: list[str] = Field(default_factory=list)
     domain_blocklist: list[str] = Field(default_factory=list)
 
