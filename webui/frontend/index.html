@@ -644,7 +644,7 @@ async function startTask() {
     es.addEventListener('done', (e) => {
       const d = JSON.parse(e.data);
       setStatus('已结束 · ' + d.reason + ' · ' + d.total_items + ' 条');
-      appendLog({ level: 'info', message: '任务结束：' + d.reason + '，共 ' + d.total_items + ' 条，流量 ' + fmtBytes(d.total_bytes) });
+      appendLog({ level: 'info', message: '任务结束：' + d.reason + '，流量 ' + fmtBytes(d.total_bytes) });
       setRunNote('完成：' + d.total_items + ' 条结果', d.total_items === 0);
       if (d.total_items === 0) {
         appendLog({ level: 'warn', message: (spec.preset && spec.preset !== 'custom')

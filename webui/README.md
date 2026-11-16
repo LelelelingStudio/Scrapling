@@ -55,6 +55,7 @@ cd /Users/david/Documents/GitHub/Scrapling/webui
 - 选「只抓这些网址」（单页模式）时，「跟随页面链接继续爬」会自动置灰禁用。
 - 起始网址可以填多行，单页模式会按 1/2/3… 逐个抓取，某个网址失败不影响其余网址。
 - 任务结束但提取到 0 条记录时，日志会用黄色提示；预设模式提示「请换一个抓取方式，或确认网址能正常打开」，自定义模式提示「请检查 CSS 选择器是否正确」。若有网址抓取失败，另用红色提示失败数量。
+- 任务正常完成时日志输出「已完成，共 X 条」；取消或触发刹车时输出「任务结束（原因），共 X 条」。
 
 ## 高级：自定义 JSON 规则
 
@@ -119,6 +120,7 @@ cd /Users/david/Documents/GitHub/Scrapling/webui
 6. `page.css(...).getall()` 返回 `TextHandlers`（str 子类），已统一转成 `str` 再序列化。
 7. SSE 用 FastAPI 原生 `StreamingResponse`，不引入 `sse-starlette`；JS 沙箱用 Node `vm`，不引入 `py_mini_racer`。
 8. `main_content_only` 不是正文抽取（只是 `<body>`），仓库内也没有 readability 类实现，所以简易模式的正文识别由 `backend/presets.py` 自己做；纯文本用 `get_all_text()`、链接用 `css("a[href]")` + `urljoin()`，都是 Scrapling 原生 API。
+9. `Spider.stream()` 是 async generator：首次 `__anext__()` 里 `set_logger()` 返回 ContextVar Token，`finally` 里 `reset_logger(token)` **必须在创建它的同一个 Context 执行**；引擎的 `_stream()` 还把 anyio TaskGroup 跨 `yield` 持有，要求每次 `__anext__()` 都在**同一个 Task** 里跑。早期「每取一条数据就新建一个 Task 调 `__anext__()`」会在收尾时报 `<Token var=<ContextVar name='scrapling_logger'...> was created in a different Context`，把成功完成的爬取误判成 `task_error`。现在 `backend/worker.py` 用一个带 `contextvars.copy_context()` 的独立 Task 驱动整条流，再用 `asyncio.Queue` 把结果交给消费协程；单页 / 隐身浏览器抓取则在独立线程 + 独立 Context 中执行。收尾只由那个独立 Task 完成，绝不从别的 Task 调 `generator.aclose()`。
 
 ## 已知限制
 
@@ -128,8 +130,8 @@ cd /Users/david/Documents/GitHub/Scrapling/webui
 - 只绑定 `127.0.0.1`，不要改成 `0.0.0.0`。放行 `Origin: null` 意味着任何本地 HTML 文件都能调用本 API，请勿在本机打开来路不明的 HTML。
 - 私有 IP / `localhost` / `.local` 等字面地址会被拒绝；未做域名 DNS 解析后的 IP 检查，跨域发现模式请自行配好白名单。
 - 「发现更多域名」默认允许跟随外链，请遵守目标站 ToS 与 robots.txt，不要高频压站。
-- 取消是协作式：取消事件与「下一条数据」竞争等待，因此即使引擎还没产出任何结果也能立即停止；同时调用引擎的 `pause()` 两次触发强制停止，`_stop_flag` 让 `parse()` 不再跟随新链接。已在队列中的少量请求可能仍会完成。
+- 取消是协作式：取消事件与「队列里的下一条数据」竞争等待，因此即使引擎还没产出任何结果也能立即停止；同时调用引擎的 `pause()` 两次触发强制停止，`_stop_flag` 让 `parse()` 不再跟随新链接。整站流的 async generator 只在那个独立 Task 内收尾（最多等 10 秒，超时才取消 driver），不会从别的 Task 关闭它。已在队列中的少量请求可能仍会完成。
 - 单页 HTTP 请求超时 15 秒（浏览器模式沿用 Scrapling 默认 30 秒）；整站模式沿用引擎默认 30 秒，另有页数/流量/域名三项刹车。
 - 不要在短时间内对同一站点反复跑测试，容易被限流导致请求超时。
-- 浏览器模式每次抓取都要启动 Chromium，慢且占资源；默认关闭。
+- 浏览器模式每次抓取都要启动 Chromium，慢且占资源；默认关闭。若日志出现 `Executable doesn't exist at .../chromium-XXXX/`，说明 Playwright/Patchright 升级后缺少对应版本的浏览器，执行 `./.venv/bin/patchright install chromium`（或 `./.venv/bin/scrapling install`）补齐；单页模式会把该错误记为跳过并继续其余网址。
 - `output/`、`.venv/` 已被 `webui/.gitignore` 忽略，不要提交抓取结果或登录态。

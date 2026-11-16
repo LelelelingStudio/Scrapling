@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import time
 import uuid
@@ -97,6 +98,10 @@ def _finish(task: Task, reason: str) -> None:
     task.status = "cancelled" if reason == "cancelled" else "done"
     task.reason = reason
     task.request_stop = None
+    if reason == "completed":
+        task.emit("log", {"level": "info", "message": f"已完成，共 {len(task.items)} 条"})
+    else:
+        task.emit("log", {"level": "info", "message": f"任务结束（{reason}），共 {len(task.items)} 条"})
     task.emit("stats", task.stats)
     task.emit(
         "done",
@@ -150,10 +155,16 @@ async def _run_single(task: Task) -> None:
     def _fetch(url: str) -> Any:
         from scrapling.fetchers import Fetcher, StealthyFetcher
 
-        if spec.browser:
-            return StealthyFetcher.fetch(url)
-        # Scrapling defaults to 30s; keep single-page tasks from hanging too long.
-        return Fetcher.get(url, timeout=15)
+        def _call() -> Any:
+            if spec.browser:
+                return StealthyFetcher.fetch(url)
+            # Scrapling defaults to 30s; keep single-page tasks from hanging too long.
+            return Fetcher.get(url, timeout=15)
+
+        # StealthyFetcher drives Playwright in this worker thread. Run it in an
+        # isolated contextvars.Context so any Scrapling logger override stays
+        # here instead of leaking back into the FastAPI request context.
+        return contextvars.copy_context().run(_call)
 
     total_urls = len(spec.start_urls)
     for index, url in enumerate(spec.start_urls, 1):
@@ -297,38 +308,74 @@ async def _run_spider(task: Task) -> None:
         },
     )
 
-    generator = spider.stream()
+    # Scrapling's Spider.stream() is an async generator: its first __anext__()
+    # calls set_logger() and its finally block calls reset_logger(token). A
+    # ContextVar Token may ONLY be reset in the exact Context that created it.
+    # Driving __anext__() from a fresh Task for every item (the old code) made
+    # the Token belong to one throwaway Task while the reset happened in the
+    # next one, raising
+    # "<Token var=<ContextVar name='scrapling_logger'...> was created in a
+    # different Context" and turning a finished crawl into a task_error.
+    # The engine's _stream() also holds an anyio TaskGroup across yields, which
+    # requires every __anext__() to run in the SAME task.
+    # Fix: drive the entire stream in ONE dedicated Task with its own isolated
+    # contextvars.Context, and hand items to this consumer through a Queue.
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+    async def drive_stream() -> None:
+        generator = spider.stream()
+        # Keep a reference even after cancellation: GC'ing a half-consumed async
+        # generator would run its finally block in yet another Context.
+        task._stream_generator = generator  # type: ignore[attr-defined]
+        try:
+            while True:
+                try:
+                    item = await generator.__anext__()
+                except StopAsyncIteration:
+                    break
+                queue.put_nowait(("item", item))
+        except BaseException as exc:  # noqa: BLE001 - forward to the consumer
+            queue.put_nowait(("error", exc))
+        finally:
+            queue.put_nowait(("done", None))
+
+    spider_context = contextvars.copy_context()
+    stream_coro = drive_stream()
+    try:
+        driver = asyncio.Task(stream_coro, context=spider_context)  # Python 3.11+
+    except TypeError:  # Python 3.10: create_task() already copies the context
+        driver = asyncio.create_task(stream_coro)
+
     last_push = 0.0
     reason = "completed"
-    stopped = False
     try:
         while True:
             if task.cancel.is_set():
                 reason = "cancelled"
                 stop_spider(True)
-                stopped = True
                 break
 
-            # Race the next item against the cancel event: cancellation must work
-            # even when the engine has not produced a single item yet.
-            next_item = asyncio.ensure_future(generator.__anext__())
+            # Race the next queued item against the cancel event: cancellation
+            # must work even before the engine has produced a single item.
+            getter = asyncio.ensure_future(queue.get())
             cancelled = asyncio.ensure_future(task.cancel.wait())
             done, pending = await asyncio.wait(
-                {next_item, cancelled}, return_when=asyncio.FIRST_COMPLETED
+                {getter, cancelled}, return_when=asyncio.FIRST_COMPLETED
             )
             for pending_task in pending:
                 pending_task.cancel()
             if cancelled in done:
                 reason = "cancelled"
                 stop_spider(True)
-                stopped = True
-                break
-            try:
-                item = next_item.result()
-            except StopAsyncIteration:
                 break
 
-            item, warning = await apply_postprocess(item, spec)
+            kind, payload = getter.result()
+            if kind == "error":
+                raise payload if isinstance(payload, BaseException) else RuntimeError(str(payload))
+            if kind == "done":
+                break
+
+            item, warning = await apply_postprocess(payload, spec)
             if warning:
                 task.emit("log", {"level": "warn", "message": warning})
             task.items.append(item)
@@ -351,19 +398,28 @@ async def _run_spider(task: Task) -> None:
                 reason = hit
                 task.emit("log", {"level": "warn", "message": f"触发刹车：{hit}"})
                 stop_spider(False)
-                stopped = True
                 break
     except BaseException as exc:
         task.emit("log", {"level": "error", "message": f"爬取中断: {exc}"})
         reason = f"error: {exc}"
-        stopped = True
-
-    if stopped:
-        # Never call generator.aclose() here: Scrapling's engine wraps the stream in
-        # an anyio TaskGroup, and closing it from another task raises
-        # "Attempted to exit cancel scope in a different task than it was entered in".
-        # Keep a reference so the generator is not garbage-collected mid-crawl.
-        task._generator = generator  # type: ignore[attr-defined]
+    finally:
+        # Let the driver tear down inside its OWN context. Never call
+        # generator.aclose() from here (a different Task): Scrapling's engine
+        # wraps the stream in an anyio TaskGroup whose cancel scope would then
+        # raise "Attempted to exit cancel scope in a different task...".
+        try:
+            await asyncio.wait_for(asyncio.shield(driver), timeout=10)
+        except asyncio.CancelledError:
+            driver.cancel()
+            raise
+        except asyncio.TimeoutError:
+            driver.cancel()
+            try:
+                await driver
+            except BaseException as exc:
+                task.emit("log", {"level": "warn", "message": f"引擎收尾超时：{exc}"})
+        except BaseException as exc:
+            task.emit("log", {"level": "error", "message": f"引擎收尾异常: {exc}"})
 
     if task.cancel.is_set() and reason == "completed":
         reason = "cancelled"
