@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scrapling 本地爬虫面板</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --line: #2b3441;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #4f9cf9;
+    --accent-2: #2f7de1;
+    --good: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 18px 26px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #141b26, #0f141c);
+  }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .3px; }
+  header .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--panel); font-size: 12px; color: var(--muted);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+  .dot.on { background: var(--good); box-shadow: 0 0 8px rgba(63,185,80,.5); }
+  .layout {
+    display: grid; grid-template-columns: 400px minmax(0, 1fr);
+    gap: 18px; padding: 18px 26px 40px; align-items: start;
+  }
+  @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 18px; margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 14px; font-size: 14px; font-weight: 600; letter-spacing: .3px; }
+  .card h2 span { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
+  label { display: block; color: var(--muted); font-size: 12px; margin: 12px 0 5px; }
+  label:first-of-type { margin-top: 0; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
+    font: inherit; outline: none; transition: border-color .15s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; }
+  textarea.code { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height: 250px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .check { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; color: var(--text); font-size: 12px; }
+  .check input { accent-color: var(--accent); }
+  .btn {
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+    padding: 9px 14px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13px;
+    transition: background .15s, border-color .15s, transform .1s;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: var(--accent-2); border-color: var(--accent-2); color: #fff; font-weight: 600; }
+  .btn.primary:hover { background: var(--accent); }
+  .btn.ghost { background: transparent; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 10px; min-height: 18px; }
+  .note.bad { color: var(--bad); }
+  .note.good { color: var(--good); }
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 620px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .stat .k { color: var(--muted); font-size: 11px; }
+  .stat .v { font-size: 22px; font-weight: 650; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .stat .v.accent { color: var(--accent); }
+  .kv { margin-top: 14px; font-size: 12px; color: var(--muted); }
+  .kv b { color: var(--text); font-weight: 500; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font-size: 11px; color: var(--text); }
+  .logbox { background: #0a0e14; border: 1px solid var(--line); border-radius: 8px; padding: 10px; height: 130px; overflow-y: auto; font: 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .logbox .info { color: var(--muted); }
+  .logbox .warn { color: var(--warn); }
+  .logbox .error { color: var(--bad); }
+  .table-wrap { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 9px 11px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { position: sticky; top: 0; background: var(--panel-2); color: var(--muted); font-weight: 500; z-index: 1; }
+  td { max-width: 360px; overflow-wrap: anywhere; }
+  .empty { color: var(--muted); padding: 22px; text-align: center; }
+  .export { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+  .export select { max-width: 150px; }
+  .hint { color: var(--muted); font-size: 11.5px; margin-top: 8px; }
+  .overlay {
+    position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+    background: rgba(4, 8, 14, .82); backdrop-filter: blur(4px); padding: 20px;
+  }
+  .overlay.hidden { display: none; }
+  .modal {
+    width: min(680px, 100%); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 16px; padding: 26px; box-shadow: 0 24px 70px rgba(0,0,0,.55);
+  }
+  .modal h2 { margin: 0 0 8px; font-size: 19px; }
+  .modal p { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+  .cmd-row { display: flex; gap: 10px; align-items: stretch; margin-bottom: 10px; }
+  .cmd-row pre {
+    flex: 1; margin: 0; background: #0a0e14; border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; color: #a5d6ff; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .cmd-row .btn { min-width: 76px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+  .step { color: var(--muted); font-size: 11px; margin: 14px 0 4px; }
+</style>
+</head>
+<body>
+
+<div id="boot" class="overlay">
+  <div class="modal">
+    <h2>本地服务未启动</h2>
+    <p>端口 8820 没有响应。请打开终端，依次执行下面两条命令，然后点「重试」。</p>
+    <div class="step">第 1 步 · 进入项目目录</div>
+    <div class="cmd-row"><pre id="cmd1"></pre><button class="btn" id="copy1">复制</button></div>
+    <div class="step">第 2 步 · 启动 localhost 服务</div>
+    <div class="cmd-row"><pre id="cmd2"></pre><button class="btn" id="copy2">复制</button></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="copyAll">复制全部</button>
+      <button class="btn primary" id="retry">重试</button>
+    </div>
+    <p class="hint" style="margin-top:16px;margin-bottom:0">服务启动后也可以直接在浏览器访问 http://127.0.0.1:8820/ ；浏览器无法替你拉起本地进程，所以这一步需要手动粘贴一次。</p>
+  </div>
+</div>
+
+<header>
+  <div>
+    <h1>Scrapling 本地爬虫面板</h1>
+    <div class="sub">零框架前端 · 后端 127.0.0.1:8820 · 数据只留在本机</div>
+  </div>
+  <div class="badge"><span class="dot" id="dot"></span><span id="connText">正在检测服务…</span></div>
+</header>
+
+<div class="layout">
+  <div>
+    <div class="card">
+      <h2>抓取配置 <span>表单会同步到右侧 JSON 规则</span></h2>
+      <div class="row">
+        <div><label for="mode">抓取模式</label>
+          <select id="mode"><option value="single">单页抓取</option><option value="spider">整站 / 持续爬取</option></select></div>
+        <div><label for="scope">链接范围</label>
+          <select id="scope"><option value="same_site">仅同站</option><option value="discover_domains">发现更多域名</option></select></div>
+      </div>
+      <div class="row">
+        <div><label for="sameSiteMode">同站判定</label>
+          <select id="sameSiteMode"><option value="host">同 host</option><option value="registered_domain">同注册域（含子域）</option></select></div>
+        <div><label for="container">记录容器（可选）</label>
+          <input type="text" id="container" placeholder=".quote"></div>
+      </div>
+      <label for="startUrls">起始网址（每行一个）</label>
+      <textarea id="startUrls" rows="3"></textarea>
+      <label for="allowlist">域名白名单（逗号分隔，仅发现模式）</label>
+      <input type="text" id="allowlist" placeholder="留空 = 不限制">
+      <label for="blocklist">域名黑名单（逗号分隔）</label>
+      <input type="text" id="blocklist" placeholder="例：example.com">
+      <div>
+        <label class="check"><input type="checkbox" id="follow"> 跟随页面链接继续爬</label>
+        <label class="check"><input type="checkbox" id="browser"> 使用隐身浏览器渲染（需先执行 scrapling install）</label>
+        <label class="check"><input type="checkbox" id="robots"> 遵守 robots.txt</label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>硬刹车 <span>任一条件触发即停止</span></h2>
+      <div class="row3">
+        <div><label for="maxPages">最大页数</label><input type="number" id="maxPages" min="1"></div>
+        <div><label for="maxDomains">最大域名数</label><input type="number" id="maxDomains" min="1"></div>
+        <div><label for="concurrency">并发数</label><input type="number" id="concurrency" min="1" max="50"></div>
+      </div>
+      <div class="row">
+        <div><label for="maxBytes">最大流量（字节）</label><input type="number" id="maxBytes" min="1"></div>
+        <div><label for="delay">请求间隔（秒）</label><input type="number" id="delay" step="0.1" min="0"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>运行</h2>
+      <div class="actions">
+        <button class="btn primary" id="startBtn">开始抓取</button>
+        <button class="btn" id="cancelBtn" disabled>取消任务</button>
+      </div>
+      <div class="note" id="runNote"></div>
+      <div class="hint">提示：整站模式建议先把「最大页数」调小（如 3）试跑。</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>规则编辑器 <span>可直接改 JSON，新规则粘贴进来点「应用规则」</span></h2>
+      <textarea class="code" id="editor" spellcheck="false"></textarea>
+      <div class="actions">
+        <button class="btn" id="applyBtn">应用规则</button>
+        <button class="btn" id="validateBtn">校验规则</button>
+        <button class="btn ghost" id="resetBtn">恢复默认</button>
+      </div>
+      <div class="note" id="ruleNote"></div>
+    </div>
+
+    <div class="card">
+      <h2>实时流量与状态 <span>SSE 推送</span></h2>
+      <div class="stats-grid">
+        <div class="stat"><div class="k">已消耗流量</div><div class="v accent" id="sBytes">0 B</div></div>
+        <div class="stat"><div class="k">请求数</div><div class="v" id="sRequests">0</div></div>
+        <div class="stat"><div class="k">结果条数</div><div class="v" id="sItems">0</div></div>
+        <div class="stat"><div class="k">失败请求</div><div class="v" id="sFailed">0</div></div>
+      </div>
+      <div class="kv">按域名流量：<span id="perDomain">—</span></div>
+      <div class="chips" id="statusChips"></div>
+      <div class="kv" style="margin-top:14px">任务状态：<b id="taskStatus">未运行</b></div>
+      <div class="logbox" id="logbox" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <h2>抓取结果</h2>
+      <div class="table-wrap">
+        <table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table>
+        <div class="empty" id="emptyHint">还没有数据，点「开始抓取」运行一次。</div>
+      </div>
+      <div class="export">
+        <select id="exportFormat">
+          <option value="json">JSON</option>
+          <option value="jsonl">JSONL</option>
+          <option value="csv">CSV</option>
+          <option value="xml">XML</option>
+        </select>
+        <button class="btn" id="exportBtn">导出结果</button>
+        <span class="hint" style="margin:0">同时保存一份到 webui/output/&lt;task_id&gt;/</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://127.0.0.1:8820';
+const CMD_CD = 'cd /Users/david/Documents/GitHub/Scrapling/webui';
+const CMD_RUN = './.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8820';
+
+const DEFAULT_SPEC = {
+  mode: 'single',
+  scope: 'same_site',
+  same_site_mode: 'host',
+  start_urls: ['https://quotes.toscrape.com/'],
+  container: '.quote',
+  fields: {
+    text:   { selector: '.text::text',   type: 'string' },
+    author: { selector: '.author::text', type: 'string', postprocess_js: 'return String(value || "").toUpperCase();' },
+    tags:   { selector: '.tag::text',    type: 'array_string' }
+  },
+  limits: {
+    max_pages: 50,
+    max_bytes: 8000000,
+    max_domains: 10,
+    concurrent_requests: 5,
+    download_delay: 0.5,
+    robots_txt_obey: true
+  },
+  browser: false,
+  follow: true,
+  domain_allowlist: [],
+  domain_blocklist: []
+};
+
+const $ = (id) => document.getElementById(id);
+let spec = JSON.parse(JSON.stringify(DEFAULT_SPEC));
+let editorDirty = false;
+let currentTask = null;
+let currentES = null;
+let columns = [];
+
+$('cmd1').textContent = CMD_CD;
+$('cmd2').textContent = CMD_RUN;
+
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(2) + ' MB';
+}
+
+function setNote(text, bad) {
+  const el = $('ruleNote');
+  el.textContent = text || '';
+  el.className = 'note' + (bad ? ' bad' : (text ? ' good' : ''));
+}
+function setRunNote(text, bad) {
+  const el = $('runNote');
+  el.textContent = text || '';
+  el.className = 'note' + (bad ? ' bad' : '');
+}
+function setStatus(text) { $('taskStatus').textContent = text; }
+function setConn(ok) {
+  $('dot').className = 'dot' + (ok ? ' on' : '');
+  $('connText').textContent = ok ? '服务已连接 · 8820' : '服务未启动 · 8820';
+}
+
+async function copyText(text, btn) {
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; } catch (e) { /* file:// 下可能被拒 */ }
+  if (!ok) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch (e) { /* ignore */ }
+    ta.remove();
+  }
+  const original = btn.dataset.label || btn.textContent;
+  btn.dataset.label = original;
+  btn.textContent = ok ? '已复制' : '请手动 Cmd+C';
+  setTimeout(() => { btn.textContent = original; }, 1600);
+}
+
+async function checkService() {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1500);
+    const res = await fetch(API + '/health', { cache: 'no-store', signal: ctrl.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      $('boot').classList.add('hidden');
+      setConn(true);
+      return true;
+    }
+  } catch (e) { /* 未启动 */ }
+  $('boot').classList.remove('hidden');
+  setConn(false);
+  return false;
+}
+
+function splitList(value) {
+  return value.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+}
+
+function syncForm() {
+  $('mode').value = spec.mode || 'single';
+  $('scope').value = spec.scope || 'same_site';
+  $('sameSiteMode').value = spec.same_site_mode || 'host';
+  $('container').value = spec.container || '';
+  $('startUrls').value = (spec.start_urls || []).join('\n');
+  $('allowlist').value = (spec.domain_allowlist || []).join(', ');
+  $('blocklist').value = (spec.domain_blocklist || []).join(', ');
+  $('follow').checked = spec.follow !== false;
+  $('browser').checked = !!spec.browser;
+  const L = spec.limits || {};
+  $('maxPages').value = L.max_pages ?? 50;
+  $('maxBytes').value = L.max_bytes ?? 8000000;
+  $('maxDomains').value = L.max_domains ?? 10;
+  $('concurrency').value = L.concurrent_requests ?? 5;
+  $('delay').value = L.download_delay ?? 0.5;
+  $('robots').checked = L.robots_txt_obey !== false;
+}
+
+function readForm() {
+  const L = spec.limits || (spec.limits = {});
+  spec.mode = $('mode').value;
+  spec.scope = $('scope').value;
+  spec.same_site_mode = $('sameSiteMode').value;
+  spec.container = $('container').value.trim() || null;
+  spec.start_urls = $('startUrls').value.split('\n').map(s => s.trim()).filter(Boolean);
+  spec.domain_allowlist = splitList($('allowlist').value);
+  spec.domain_blocklist = splitList($('blocklist').value);
+  spec.follow = $('follow').checked;
+  spec.browser = $('browser').checked;
+  L.max_pages = Number($('maxPages').value) || 50;
+  L.max_bytes = Number($('maxBytes').value) || 8000000;
+  L.max_domains = Number($('maxDomains').value) || 10;
+  L.concurrent_requests = Number($('concurrency').value) || 5;
+  L.download_delay = Number($('delay').value) || 0;
+  L.robots_txt_obey = $('robots').checked;
+}
+
+function renderEditor() {
+  $('editor').value = JSON.stringify(spec, null, 2);
+  editorDirty = false;
+}
+
+function applyEditor() {
+  try {
+    const parsed = JSON.parse($('editor').value);
+    if (!parsed.fields || typeof parsed.fields !== 'object' || !Object.keys(parsed.fields).length) {
+      throw new Error('缺少 fields 字段规则');
+    }
+    if (!Array.isArray(parsed.start_urls) || !parsed.start_urls.length) {
+      throw new Error('缺少 start_urls');
+    }
+    parsed.limits = Object.assign({}, DEFAULT_SPEC.limits, parsed.limits || {});
+    parsed.mode = parsed.mode || 'single';
+    parsed.scope = parsed.scope || 'same_site';
+    parsed.same_site_mode = parsed.same_site_mode || 'host';
+    parsed.domain_allowlist = parsed.domain_allowlist || [];
+    parsed.domain_blocklist = parsed.domain_blocklist || [];
+    spec = parsed;
+    editorDirty = false;
+    syncForm();
+    setNote('规则已应用，共 ' + Object.keys(spec.fields).length + ' 个字段');
+    return true;
+  } catch (e) {
+    setNote('规则无效：' + e.message, true);
+    return false;
+  }
+}
+
+function validateEditor() {
+  try {
+    const parsed = JSON.parse($('editor').value);
+    if (!parsed.fields || !Object.keys(parsed.fields).length) throw new Error('缺少 fields');
+    if (!Array.isArray(parsed.start_urls) || !parsed.start_urls.length) throw new Error('缺少 start_urls');
+    for (const [name, rule] of Object.entries(parsed.fields)) {
+      if (!rule.selector) throw new Error('字段 ' + name + ' 缺少 selector');
+    }
+    setNote('JSON 合法，字段数：' + Object.keys(parsed.fields).length);
+    return true;
+  } catch (e) {
+    setNote('校验失败：' + e.message, true);
+    return false;
+  }
+}
+
+function appendLog(entry) {
+  const box = $('logbox');
+  const line = document.createElement('div');
+  line.className = entry.level || 'info';
+  line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + (entry.message || '');
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderStats(d) {
+  $('sBytes').textContent = fmtBytes(d.response_bytes);
+  $('sRequests').textContent = d.requests ?? 0;
+  $('sItems').textContent = d.items ?? $('tbody').children.length;
+  $('sFailed').textContent = d.failed ?? 0;
+  const domains = d.per_domain || {};
+  const entries = Object.entries(domains).sort((a, b) => b[1] - a[1]);
+  $('perDomain').textContent = entries.length
+    ? entries.map(([k, v]) => k + ': ' + fmtBytes(v)).join('  ·  ')
+    : '—';
+  const chips = $('statusChips');
+  chips.innerHTML = '';
+  for (const [k, v] of Object.entries(d.status_count || {})) {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = k.replace('status_', 'HTTP ') + ' × ' + v;
+    chips.appendChild(chip);
+  }
+}
+
+function buildHeader() {
+  columns = Object.keys(spec.fields || {});
+  $('thead').innerHTML = '';
+  for (const key of columns) {
+    const th = document.createElement('th');
+    th.textContent = key;
+    $('thead').appendChild(th);
+  }
+}
+
+function appendRow(item) {
+  $('emptyHint').style.display = 'none';
+  const tr = document.createElement('tr');
+  for (const key of columns) {
+    const td = document.createElement('td');
+    const value = item[key];
+    td.textContent = (value === null || value === undefined) ? '' :
+      (typeof value === 'object' ? JSON.stringify(value) : String(value));
+    tr.appendChild(td);
+  }
+  $('tbody').appendChild(tr);
+  $('sItems').textContent = $('tbody').children.length;
+}
+
+function clearResults() {
+  $('tbody').innerHTML = '';
+  $('logbox').innerHTML = '';
+  $('statusChips').innerHTML = '';
+  $('emptyHint').style.display = '';
+  $('perDomain').textContent = '—';
+  $('sBytes').textContent = '0 B';
+  $('sRequests').textContent = '0';
+  $('sItems').textContent = '0';
+  $('sFailed').textContent = '0';
+  buildHeader();
+}
+
+async function startTask() {
+  if (editorDirty && !applyEditor()) return;
+  readForm();
+  renderEditor();
+  if (!spec.start_urls.length) { setRunNote('请至少填一个起始网址', true); return; }
+  if (!(await checkService())) return;
+
+  if (currentES) currentES.close();
+  clearResults();
+  setStatus('运行中…');
+  setRunNote('正在创建任务…');
+  $('startBtn').disabled = true;
+  $('cancelBtn').disabled = false;
+
+  try {
+    const res = await fetch(API + '/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(spec)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail ? JSON.stringify(data.detail) : res.statusText);
+    currentTask = data.task_id;
+    setRunNote('任务 ' + currentTask + ' 已创建');
+
+    const es = new EventSource(API + '/api/tasks/' + currentTask + '/stream');
+    currentES = es;
+    es.addEventListener('connected', () => appendLog({ level: 'info', message: 'SSE 已连接' }));
+    es.addEventListener('item', (e) => appendRow(JSON.parse(e.data)));
+    es.addEventListener('stats', (e) => renderStats(JSON.parse(e.data)));
+    es.addEventListener('log', (e) => appendLog(JSON.parse(e.data)));
+    es.addEventListener('done', (e) => {
+      const d = JSON.parse(e.data);
+      setStatus('已结束 · ' + d.reason + ' · ' + d.total_items + ' 条');
+      appendLog({ level: 'info', message: '任务结束：' + d.reason + '，共 ' + d.total_items + ' 条，流量 ' + fmtBytes(d.total_bytes) });
+      setRunNote('完成：' + d.total_items + ' 条结果');
+      $('startBtn').disabled = false;
+      $('cancelBtn').disabled = true;
+      es.close();
+      currentES = null;
+    });
+    es.addEventListener('task_error', (e) => {
+      const d = JSON.parse(e.data);
+      setStatus('出错');
+      appendLog({ level: 'error', message: d.message || '未知错误' });
+      setRunNote(d.message || '任务失败', true);
+      $('startBtn').disabled = false;
+      $('cancelBtn').disabled = true;
+      es.close();
+      currentES = null;
+    });
+    es.onerror = () => {
+      if (currentES) appendLog({ level: 'warn', message: 'SSE 连接中断，正在自动重连…' });
+    };
+  } catch (e) {
+    setStatus('启动失败');
+    setRunNote('启动失败：' + e.message, true);
+    $('startBtn').disabled = false;
+    $('cancelBtn').disabled = true;
+  }
+}
+
+async function cancelTask() {
+  if (!currentTask) return;
+  try {
+    await fetch(API + '/api/tasks/' + currentTask + '/cancel', { method: 'POST' });
+    appendLog({ level: 'warn', message: '已请求取消任务' });
+  } catch (e) {
+    appendLog({ level: 'error', message: '取消请求失败：' + e.message });
+  }
+}
+
+async function downloadResult() {
+  if (!currentTask) { setRunNote('请先运行一次任务再导出', true); return; }
+  const fmt = $('exportFormat').value;
+  try {
+    const res = await fetch(API + '/api/tasks/' + currentTask + '/result?format=' + fmt);
+    if (!res.ok) throw new Error(res.statusText);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'scrape-' + currentTask + '.' + fmt;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    appendLog({ level: 'info', message: '已导出 ' + fmt.toUpperCase() });
+  } catch (e) {
+    appendLog({ level: 'error', message: '导出失败：' + e.message });
+  }
+}
+
+$('copy1').addEventListener('click', (e) => copyText(CMD_CD, e.currentTarget));
+$('copy2').addEventListener('click', (e) => copyText(CMD_RUN, e.currentTarget));
+$('copyAll').addEventListener('click', (e) => copyText(CMD_CD + '\n' + CMD_RUN, e.currentTarget));
+$('retry').addEventListener('click', checkService);
+$('editor').addEventListener('input', () => { editorDirty = true; });
+$('applyBtn').addEventListener('click', applyEditor);
+$('validateBtn').addEventListener('click', validateEditor);
+$('resetBtn').addEventListener('click', () => {
+  spec = JSON.parse(JSON.stringify(DEFAULT_SPEC));
+  syncForm();
+  renderEditor();
+  setNote('已恢复默认规则');
+});
+$('startBtn').addEventListener('click', startTask);
+$('cancelBtn').addEventListener('click', cancelTask);
+$('exportBtn').addEventListener('click', downloadResult);
+
+const formIds = ['mode', 'scope', 'sameSiteMode', 'container', 'startUrls', 'allowlist',
+  'blocklist', 'follow', 'browser', 'robots', 'maxPages', 'maxBytes', 'maxDomains',
+  'concurrency', 'delay'];
+for (const id of formIds) {
+  $(id).addEventListener('change', () => {
+    if (editorDirty) applyEditor();
+    readForm();
+    renderEditor();
+    setNote('');
+  });
+}
+
+syncForm();
+renderEditor();
+buildHeader();
+checkService();
+setInterval(() => { if (!currentES) checkService(); }, 25000);
+</script>
+</body>
+</html>
